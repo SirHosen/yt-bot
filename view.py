@@ -7,7 +7,7 @@ from selenium_stealth import stealth
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
-
+from selenium.webdriver.common.by import By
 def get_random_user_agent():
     """Generate a random user agent."""
     ua = UserAgent()
@@ -72,25 +72,32 @@ def human_like_interaction(driver):
         time.sleep(scroll_pause)
 
     # Random clicks on page elements
-    elements = driver.find_elements_by_xpath("//*[not(self::script) and not(self::style)]")
-    if elements:
-        for _ in range(random.randint(1, 3)):
-            element = random.choice(elements)
-            try:
-                action.move_to_element(element).click().perform()
-                time.sleep(random.uniform(0.5, 2.0))
-            except:
-                continue
+    try:
+        elements = driver.find_elements(By.XPATH, "//*[not(self::script) and not(self::style)]")
+        if elements:
+            for _ in range(random.randint(1, 3)):
+                element = random.choice(elements)
+                try:
+                    action.move_to_element(element).click().perform()
+                    time.sleep(random.uniform(0.5, 2.0))
+                except:
+                    continue
+    except Exception as e:
+        pass
 
     # Simulate video watching behavior
     watch_time = random.uniform(15, 120)
     time.sleep(watch_time)
 
     # Random mouse exit
-    action.move_by_offset(random.randint(-300, -100), random.randint(-200, -50)).perform()
+    try:
+        action.move_by_offset(random.randint(-300, -100), random.randint(-200, -50)).perform()
+    except:
+        pass
 
 def load_session(url, proxy=None, session_id=None):
     """Load a YouTube session with enhanced evasion techniques."""
+    driver = None
     try:
         driver = create_driver(proxy)
         print(f"[Session {session_id}] Opening YouTube URL with proxy: {proxy if proxy else 'No proxy'}")
@@ -98,59 +105,79 @@ def load_session(url, proxy=None, session_id=None):
         # Random delay before page load
         time.sleep(random.uniform(1, 5))
 
-        driver.get(url)
-
-        # Check for CAPTCHA or bot detection
-        if "verify" in driver.current_url.lower() or "captcha" in driver.page_source.lower():
-            print(f"[Session {session_id}] Bot detection triggered. Rotating proxy")
-            driver.quit()
+        try:
+            driver.get(url)
+        except Exception as e:
+            print(f"[Session {session_id}] Error loading page with proxy {proxy}: {e}")
+            if driver:
+                driver.quit()
             return False
 
+        # Check for CAPTCHA or bot detection
+        try:
+            if "verify" in driver.current_url.lower() or "captcha" in driver.page_source.lower():
+                print(f"[Session {session_id}] Bot detection triggered. Rotating proxy")
+                driver.quit()
+                return False
+        except Exception:
+            pass
+
         # Simulate human-like interaction
-        human_like_interaction(driver)
+        try:
+            human_like_interaction(driver)
+        except Exception as e:
+            print(f"[Session {session_id}] Error during interaction: {e}")
 
         # Random video interaction
         try:
             # Like/dislike simulation (random)
             if random.random() > 0.7:
-                like_btn = driver.find_element_by_xpath('//*[@id="segmented-like-button"]')
-                ActionChains(driver).move_to_element(like_btn).pause(random.uniform(0.5, 1.5)).click().perform()
-                time.sleep(random.uniform(1, 3))
+                try:
+                    like_btn = driver.find_element(By.XPATH, '//*[@id="segmented-like-button"]')
+                    ActionChains(driver).move_to_element(like_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                    time.sleep(random.uniform(1, 3))
+                except Exception:
+                    pass
 
             # Subscribe simulation (random)
             if random.random() > 0.9:
-                sub_btn = driver.find_element_by_xpath('//*[@id="subscribe-button"]')
-                ActionChains(driver).move_to_element(sub_btn).pause(random.uniform(0.5, 1.5)).click().perform()
-                time.sleep(random.uniform(1, 3))
+                try:
+                    sub_btn = driver.find_element(By.XPATH, '//*[@id="subscribe-button"]')
+                    ActionChains(driver).move_to_element(sub_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                    time.sleep(random.uniform(1, 3))
+                except Exception:
+                    pass
 
             # Comment simulation (random)
             if random.random() > 0.95:
-                comment_btn = driver.find_element_by_x
-                comment_btn = driver.find_element_by_xpath('//*[@id="placeholder-area"]')
-                ActionChains(driver).move_to_element(comment_btn).pause(random.uniform(0.5, 1.5)).click().perform()
-                time.sleep(random.uniform(1, 2))
+                try:
+                    comment_btn = driver.find_element(By.XPATH, '//*[@id="placeholder-area"]')
+                    ActionChains(driver).move_to_element(comment_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                    time.sleep(random.uniform(1, 2))
 
-                # Type random comment
-                comments = [
-                    "Great video! Learned a lot.",
-                    "First comment! 🚀",
-                    "This content is fire 🔥",
-                    "Subbed! Keep it up!",
-                    "Algorithm brought me here, but quality kept me watching",
-                    "This explains so much, thanks!",
-                    "Bookmarking this for later",
-                    "When you realize this was uploaded 3 years ago but still relevant"
-                ]
-                comment = random.choice(comments)
-                comment_box = driver.find_element_by_xpath('//*[@id="contenteditable-root"]')
-                for char in comment:
-                    comment_box.send_keys(char)
-                    time.sleep(random.uniform(0.05, 0.2))
-                
-                time.sleep(random.uniform(1, 3))
-                # Submit comment
-                submit_btn = driver.find_element_by_xpath('//*[@id="submit-button"]')
-                ActionChains(driver).move_to_element(submit_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                    # Type random comment
+                    comments = [
+                        "Great video! Learned a lot.",
+                        "First comment! 🚀",
+                        "This content is fire 🔥",
+                        "Subbed! Keep it up!",
+                        "Algorithm brought me here, but quality kept me watching",
+                        "This explains so much, thanks!",
+                        "Bookmarking this for later",
+                        "When you realize this was uploaded 3 years ago but still relevant"
+                    ]
+                    comment = random.choice(comments)
+                    comment_box = driver.find_element(By.XPATH, '//*[@id="contenteditable-root"]')
+                    for char in comment:
+                        comment_box.send_keys(char)
+                        time.sleep(random.uniform(0.05, 0.2))
+                    
+                    time.sleep(random.uniform(1, 3))
+                    # Submit comment
+                    submit_btn = driver.find_element(By.XPATH, '//*[@id="submit-button"]')
+                    ActionChains(driver).move_to_element(submit_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                except Exception:
+                    pass
                 
         except Exception as e:
             print(f"[Session {session_id}] Random interaction error (Proxy: {proxy}): {e}")
