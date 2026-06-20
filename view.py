@@ -1,10 +1,14 @@
 import time
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from fake_useragent import UserAgent
 from selenium_stealth import stealth
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 def get_random_user_agent():
     """Generate a random user agent."""
@@ -19,6 +23,7 @@ def create_driver(proxy=None):
     options.add_argument(f"--user-agent={get_random_user_agent()}")
     
     options.add_argument('--headless')  # Run Chrome in headless mode (remove to see the window)
+    options.add_argument('--mute-audio') # Mute audio for the bot
     
     if proxy:
         options.add_argument(f'--proxy-server=http://{proxy}')
@@ -38,21 +43,31 @@ def create_driver(proxy=None):
 
 def load_session(url, proxy=None):
     """Load a YouTube session using the specified proxy."""
+    driver = None
     try:
         driver = create_driver(proxy)
         print(f"Opening YouTube URL with proxy: {proxy if proxy else 'No proxy'}")
         driver.get(url)
         
-        # Simulate human-like actions with random sleep time
-        action = ActionChains(driver)
-        action.move_by_offset(0, 100).click().perform()  # Simulate scrolling
-        time.sleep(random.uniform(10, 30))  # Simulate watching the video
+        # Wait for the video player to load and try to play it
+        try:
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'video')))
+            # Try to play the video via JavaScript
+            driver.execute_script("document.getElementsByTagName('video')[0].play();")
+        except Exception as e:
+            print(f"Video play warning (proxy: {proxy}): {e}")
+            
+        watch_time = random.uniform(10, 30)
+        print(f"Watching video for {watch_time:.2f} seconds... (Proxy: {proxy})")
+        time.sleep(watch_time)  # Simulate watching the video
         
-        print("Session completed successfully.")
+        print(f"Session completed successfully. (Proxy: {proxy})")
         
-        driver.quit()
     except Exception as e:
         print(f"Error occurred with proxy {proxy if proxy else 'No proxy'}: {e}")
+    finally:
+        if driver:
+            driver.quit()  # Ensure the browser is always closed to prevent memory leaks
 
 def load_proxies(file_path):
     """Load proxies from a file."""
@@ -67,11 +82,16 @@ def load_proxies(file_path):
         print(f"Proxy file not found: {file_path}")
         return []
 
+def worker(url, proxies, use_proxies):
+    """Worker function for threads."""
+    proxy = random.choice(proxies) if use_proxies else None
+    load_session(url, proxy)
+
 if __name__ == "__main__":
     # Inputs from the user
     youtube_url = input("Enter YouTube URL: ").strip()
-    refresh_rate = float(input("Enter refresh rate (seconds): ").strip())
     view_count = int(input("Enter number of views: ").strip())
+    thread_count = int(input("Enter number of concurrent threads (e.g., 5): ").strip())
     
     # Load proxies from the file
     proxy_file = './proxies.txt'
@@ -84,12 +104,12 @@ if __name__ == "__main__":
         print("No proxies available. Proceeding without proxies.")
     
     # Start sessions
-    print("Starting YouTube view automation...")
-    counter = 0
-    while counter < view_count:
-        proxy = random.choice(proxies) if use_proxies else None
-        load_session(youtube_url, proxy)
-        counter += 1
-        time.sleep(refresh_rate)
+    print(f"Starting YouTube view automation with {thread_count} concurrent threads...")
     
+    with ThreadPoolExecutor(max_workers=thread_count) as executor:
+        for _ in range(view_count):
+            executor.submit(worker, youtube_url, proxies, use_proxies)
+            # Add a small delay between starting threads to prevent overwhelming the system
+            time.sleep(1)
+            
     print(f"Completed {view_count} views.")
