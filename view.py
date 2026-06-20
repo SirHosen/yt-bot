@@ -1,14 +1,12 @@
 import time
 import random
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
 from fake_useragent import UserAgent
 from selenium_stealth import stealth
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 
 def get_random_user_agent():
     """Generate a random user agent."""
@@ -21,15 +19,14 @@ def create_driver(proxy=None):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument(f"--user-agent={get_random_user_agent()}")
-    
+
     options.add_argument('--headless')  # Run Chrome in headless mode (remove to see the window)
-    options.add_argument('--mute-audio') # Mute audio for the bot
-    
+
     if proxy:
         options.add_argument(f'--proxy-server=http://{proxy}')
-    
+
     driver = webdriver.Chrome(options=options)
-    
+
     # Apply stealth mode to bypass detection
     stealth(driver,
             languages=["en-US", "en"],
@@ -37,34 +34,131 @@ def create_driver(proxy=None):
             platform="Win32",
             webgl_vendor="Intel Inc.",
             renderer="Intel Iris OpenGL Engine",
-            fix_hairline=True)
-    
+            fix_hairline=True,
+            run_on_insecure_origins=True)
+
+    # Additional evasion techniques
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en']
+            });
+        """
+    })
     return driver
 
-def load_session(url, proxy=None):
-    """Load a YouTube session using the specified proxy."""
-    driver = None
+def human_like_interaction(driver):
+    """Simulate human-like mouse movements and interactions."""
+    action = ActionChains(driver)
+    # Random mouse movements
+    for _ in range(random.randint(3, 7)):
+        x_offset = random.randint(-100, 100)
+        y_offset = random.randint(-50, 50)
+        action.move_by_offset(x_offset, y_offset).perform()
+        time.sleep(random.uniform(0.1, 0.5))
+
+    # Random scrolling
+    scroll_pause = random.uniform(0.5, 1.5)
+    scroll_height = driver.execute_script("return document.body.scrollHeight")
+    for _ in range(random.randint(2, 5)):
+        scroll_amount = random.randint(100, 500)
+        driver.execute_script(f"window.scrollBy(0, {scroll_amount});")
+        time.sleep(scroll_pause)
+
+    # Random clicks on page elements
+    elements = driver.find_elements_by_xpath("//*[not(self::script) and not(self::style)]")
+    if elements:
+        for _ in range(random.randint(1, 3)):
+            element = random.choice(elements)
+            try:
+                action.move_to_element(element).click().perform()
+                time.sleep(random.uniform(0.5, 2.0))
+            except:
+                continue
+
+    # Simulate video watching behavior
+    watch_time = random.uniform(15, 120)
+    time.sleep(watch_time)
+
+    # Random mouse exit
+    action.move_by_offset(random.randint(-300, -100), random.randint(-200, -50)).perform()
+
+def load_session(url, proxy=None, session_id=None):
+    """Load a YouTube session with enhanced evasion techniques."""
     try:
         driver = create_driver(proxy)
-        print(f"Opening YouTube URL with proxy: {proxy if proxy else 'No proxy'}")
+        print(f"[Session {session_id}] Opening YouTube URL with proxy: {proxy if proxy else 'No proxy'}")
+
+        # Random delay before page load
+        time.sleep(random.uniform(1, 5))
+
         driver.get(url)
-        
-        # Wait for the video player to load and try to play it
+
+        # Check for CAPTCHA or bot detection
+        if "verify" in driver.current_url.lower() or "captcha" in driver.page_source.lower():
+            print(f"[Session {session_id}] Bot detection triggered. Rotating proxy")
+            driver.quit()
+            return False
+
+        # Simulate human-like interaction
+        human_like_interaction(driver)
+
+        # Random video interaction
         try:
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'video')))
-            # Try to play the video via JavaScript
-            driver.execute_script("document.getElementsByTagName('video')[0].play();")
+            # Like/dislike simulation (random)
+            if random.random() > 0.7:
+                like_btn = driver.find_element_by_xpath('//*[@id="segmented-like-button"]')
+                ActionChains(driver).move_to_element(like_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                time.sleep(random.uniform(1, 3))
+
+            # Subscribe simulation (random)
+            if random.random() > 0.9:
+                sub_btn = driver.find_element_by_xpath('//*[@id="subscribe-button"]')
+                ActionChains(driver).move_to_element(sub_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                time.sleep(random.uniform(1, 3))
+
+            # Comment simulation (random)
+            if random.random() > 0.95:
+                comment_btn = driver.find_element_by_x
+                comment_btn = driver.find_element_by_xpath('//*[@id="placeholder-area"]')
+                ActionChains(driver).move_to_element(comment_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                time.sleep(random.uniform(1, 2))
+
+                # Type random comment
+                comments = [
+                    "Great video! Learned a lot.",
+                    "First comment! 🚀",
+                    "This content is fire 🔥",
+                    "Subbed! Keep it up!",
+                    "Algorithm brought me here, but quality kept me watching",
+                    "This explains so much, thanks!",
+                    "Bookmarking this for later",
+                    "When you realize this was uploaded 3 years ago but still relevant"
+                ]
+                comment = random.choice(comments)
+                comment_box = driver.find_element_by_xpath('//*[@id="contenteditable-root"]')
+                for char in comment:
+                    comment_box.send_keys(char)
+                    time.sleep(random.uniform(0.05, 0.2))
+                
+                time.sleep(random.uniform(1, 3))
+                # Submit comment
+                submit_btn = driver.find_element_by_xpath('//*[@id="submit-button"]')
+                ActionChains(driver).move_to_element(submit_btn).pause(random.uniform(0.5, 1.5)).click().perform()
+                
         except Exception as e:
-            print(f"Video play warning (proxy: {proxy}): {e}")
+            print(f"[Session {session_id}] Random interaction error (Proxy: {proxy}): {e}")
             
-        watch_time = random.uniform(10, 30)
-        print(f"Watching video for {watch_time:.2f} seconds... (Proxy: {proxy})")
-        time.sleep(watch_time)  # Simulate watching the video
-        
-        print(f"Session completed successfully. (Proxy: {proxy})")
+        print(f"[Session {session_id}] Session completed successfully. (Proxy: {proxy})")
         
     except Exception as e:
-        print(f"Error occurred with proxy {proxy if proxy else 'No proxy'}: {e}")
+        print(f"[Session {session_id}] Error occurred with proxy {proxy if proxy else 'No proxy'}: {e}")
     finally:
         if driver:
             driver.quit()  # Ensure the browser is always closed to prevent memory leaks
@@ -82,10 +176,13 @@ def load_proxies(file_path):
         print(f"Proxy file not found: {file_path}")
         return []
 
-def worker(url, proxies, use_proxies):
+def worker(url, proxies, use_proxies, task_queue):
     """Worker function for threads."""
-    proxy = random.choice(proxies) if use_proxies else None
-    load_session(url, proxy)
+    while not task_queue.empty():
+        session_id = task_queue.get()
+        proxy = random.choice(proxies) if use_proxies else None
+        load_session(url, proxy, session_id)
+        task_queue.task_done()
 
 if __name__ == "__main__":
     # Inputs from the user
@@ -106,10 +203,20 @@ if __name__ == "__main__":
     # Start sessions
     print(f"Starting YouTube view automation with {thread_count} concurrent threads...")
     
-    with ThreadPoolExecutor(max_workers=thread_count) as executor:
-        for _ in range(view_count):
-            executor.submit(worker, youtube_url, proxies, use_proxies)
-            # Add a small delay between starting threads to prevent overwhelming the system
-            time.sleep(1)
+    task_queue = Queue()
+    for i in range(view_count):
+        task_queue.put(i + 1)
+        
+    threads = []
+    for _ in range(thread_count):
+        t = threading.Thread(target=worker, args=(youtube_url, proxies, use_proxies, task_queue))
+        t.daemon = True
+        t.start()
+        threads.append(t)
+        # Add a small delay between starting threads
+        time.sleep(1)
+        
+    # Wait for all tasks to complete
+    task_queue.join()
             
     print(f"Completed {view_count} views.")
