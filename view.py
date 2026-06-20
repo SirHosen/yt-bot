@@ -23,7 +23,10 @@ def create_driver(proxy=None):
     options.add_argument('--headless')  # Run Chrome in headless mode (remove to see the window)
 
     if proxy:
-        options.add_argument(f'--proxy-server=http://{proxy}')
+        if "://" not in proxy:
+            options.add_argument(f'--proxy-server=http://{proxy}')
+        else:
+            options.add_argument(f'--proxy-server={proxy}')
 
     driver = webdriver.Chrome(options=options)
 
@@ -60,7 +63,11 @@ def human_like_interaction(driver):
     for _ in range(random.randint(3, 7)):
         x_offset = random.randint(-100, 100)
         y_offset = random.randint(-50, 50)
-        action.move_by_offset(x_offset, y_offset).perform()
+        try:
+            action.move_by_offset(x_offset, y_offset).perform()
+        except:
+            # Reset actions if we move out of bounds
+            action.reset_actions()
         time.sleep(random.uniform(0.1, 0.5))
 
     # Random scrolling
