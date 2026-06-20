@@ -72,7 +72,10 @@ def human_like_interaction(driver):
 
     # Random scrolling
     scroll_pause = random.uniform(0.5, 1.5)
-    scroll_height = driver.execute_script("return document.body.scrollHeight")
+    try:
+        scroll_height = driver.execute_script("return document.body.scrollHeight")
+    except:
+        scroll_height = 0
     for _ in range(random.randint(2, 5)):
         scroll_amount = random.randint(100, 500)
         driver.execute_script(f"window.scrollBy(0, {scroll_amount});")
