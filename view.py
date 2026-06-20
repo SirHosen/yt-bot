@@ -1,191 +1,345 @@
 import time
 import random
 import threading
-from queue import Queue
+import os
+import json
 import logging
+from queue import Queue
 from fake_useragent import UserAgent
 import undetected_chromedriver as uc
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
-
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import (TimeoutException, NoSuchElementException,
+                                        StaleElementReferenceException, WebDriverException)
 from rich.live import Live
 from rich.table import Table
 from rich.console import Console
+import psutil
+import numpy as np
 
-# Konfigurasi Logging agar error tidak memenuhi terminal
-logging.basicConfig(filename='bot_errors.log', level=logging.ERROR, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+# --- CONFIGURATION ---
+MAX_RETRIES = 3
+SESSION_TIMEOUT = 300
+MIN_WATCH_TIME = 30
+MEMORY_CLEANUP_INTERVAL = 10
 
+logging.basicConfig(
+    filename='bot_errors.log', level=logging.ERROR,
+    format='%(asctime)s - %(levelname)s - %(message)s', filemode='w'
+)
 console = Console()
 thread_status = {}
+session_data = {}
 
+# --- HELPER FUNCTIONS ---
 def update_status(session_id, proxy, status):
-    thread_status[session_id] = {"proxy": proxy if proxy else "Direct IP", "status": status}
+    thread_status[session_id] = {
+        "proxy": proxy if proxy else "Direct IP",
+        "status": status
+    }
 
 def generate_table():
     table = Table(show_header=True, header_style="bold cyan", title="🔥 YouTube View Bot Dashboard 🔥")
     table.add_column("Session ID", style="dim", width=12)
     table.add_column("Proxy", width=30)
     table.add_column("Status")
-    
-    # Sort keys so session order remains consistent
+
     for session_id in sorted(thread_status.keys()):
         info = thread_status[session_id]
         table.add_row(
-            f"Session {session_id}", 
-            info.get("proxy", "None"), 
+            f"Session {session_id}",
+            info.get("proxy", "None"),
             info.get("status", "Starting...")
         )
     return table
 
 def get_random_user_agent():
-    """Generate a random user agent."""
     ua = UserAgent()
-    return ua.random
+    if random.random() < 0.6:
+        return ua.random_device  # Mobile UA
+    else:
+        return ua.random  # Desktop UA
 
-def create_driver(proxy=None):
-    """Create a UC WebDriver instance."""
-    options = uc.ChromeOptions()
-    options.add_argument("--no-sandbox")
-    options.add_argument("--mute-audio")
-    options.add_argument(f"--user-agent={get_random_user_agent()}")
-
-    if proxy:
-        if "://" not in proxy:
-            options.add_argument(f'--proxy-server=http://{proxy}')
-        else:
-            options.add_argument(f'--proxy-server={proxy}')
-
-    driver = uc.Chrome(options=options, headless=True)
-    return driver
-
-def human_like_interaction(driver, watch_duration_minutes, session_id, proxy):
-    """Simulate human-like mouse movements and interactions."""
-    action = ActionChains(driver)
-    
-    update_status(session_id, proxy, "[yellow]Moving mouse randomly...[/yellow]")
-    for _ in range(random.randint(3, 7)):
-        x_offset = random.randint(-100, 100)
-        y_offset = random.randint(-50, 50)
+def clean_memory():
+    for proc in psutil.process_iter(['pid', 'name']):
         try:
-            action.move_by_offset(x_offset, y_offset).perform()
-        except:
-            action.reset_actions()
-        time.sleep(random.uniform(0.1, 0.5))
-
-    update_status(session_id, proxy, "[yellow]Scrolling page...[/yellow]")
-    scroll_pause = random.uniform(0.5, 1.5)
-    try:
-        scroll_height = driver.execute_script("return document.body.scrollHeight")
-    except:
-        scroll_height = 0
-    for _ in range(random.randint(2, 5)):
-        scroll_amount = random.randint(100, 500)
-        driver.execute_script(f"window.scrollBy(0, {scroll_amount});")
-        time.sleep(scroll_pause)
-
-    # Random clicks on page elements
-    try:
-        elements = driver.find_elements(By.XPATH, "//*[not(self::script) and not(self::style)]")
-        if elements:
-            for _ in range(random.randint(1, 3)):
-                element = random.choice(elements)
-                try:
-                    action.move_to_element(element).click().perform()
-                    time.sleep(random.uniform(0.5, 2.0))
-                except:
-                    continue
-    except Exception:
-        pass
-
-    base_watch_time = watch_duration_minutes * 60
-    watch_time = random.uniform(base_watch_time * 0.9, base_watch_time * 1.1)
-    
-    update_status(session_id, proxy, f"[bold green]Watching video for {watch_time:.0f}s[/bold green]")
-    time.sleep(watch_time)
-
-    try:
-        action.move_by_offset(random.randint(-300, -100), random.randint(-200, -50)).perform()
-    except:
-        pass
-
-def load_session(url, proxy=None, session_id=None, watch_duration_minutes=2.0):
-    """Load a YouTube session with undetected_chromedriver."""
-    driver = None
-    try:
-        update_status(session_id, proxy, "[cyan]Initializing Browser...[/cyan]")
-        driver = create_driver(proxy)
-        
-        update_status(session_id, proxy, "[cyan]Loading URL...[/cyan]")
-        time.sleep(random.uniform(1, 5))
-
-        try:
-            driver.get(url)
-        except Exception as e:
-            update_status(session_id, proxy, "[bold red]Connection Failed[/bold red]")
-            logging.error(f"[Session {session_id}] Load Error (Proxy: {proxy}): {e}")
-            if driver:
-                driver.quit()
-            return False
-
-        try:
-            if "verify" in driver.current_url.lower() or "captcha" in driver.page_source.lower():
-                update_status(session_id, proxy, "[bold red]CAPTCHA Detected[/bold red]")
-                driver.quit()
-                return False
-        except Exception:
+            if 'chrome' in proc.info['name'].lower():
+                proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-
-        try:
-            human_like_interaction(driver, watch_duration_minutes, session_id, proxy)
-        except Exception as e:
-            logging.error(f"[Session {session_id}] Interaction Error: {e}")
-
-        # Like/Subscribe/Comment Simulation 
-        update_status(session_id, proxy, "[cyan]Performing post-watch interactions...[/cyan]")
-        try:
-            if random.random() > 0.7:
-                try:
-                    like_btn = driver.find_element(By.XPATH, '//*[@id="segmented-like-button"]')
-                    ActionChains(driver).move_to_element(like_btn).pause(random.uniform(0.5, 1.5)).click().perform()
-                    time.sleep(random.uniform(1, 3))
-                except: pass
-
-            if random.random() > 0.9:
-                try:
-                    sub_btn = driver.find_element(By.XPATH, '//*[@id="subscribe-button"]')
-                    ActionChains(driver).move_to_element(sub_btn).pause(random.uniform(0.5, 1.5)).click().perform()
-                    time.sleep(random.uniform(1, 3))
-                except: pass
-
-        except Exception as e:
-            logging.error(f"[Session {session_id}] Post-watch Error: {e}")
-            
-        update_status(session_id, proxy, "[bold blue]Session Completed 🎉[/bold blue]")
-        time.sleep(2)
-        
-    except Exception as e:
-        update_status(session_id, proxy, "[bold red]Session Crashed[/bold red]")
-        logging.error(f"[Session {session_id}] General Error (Proxy: {proxy}): {e}")
-    finally:
-        if driver:
-            driver.quit()
 
 def load_proxies(file_path):
     try:
         with open(file_path, 'r') as file:
             proxies = [line.strip() for line in file if line.strip()]
-        if not proxies:
-            return []
-        return proxies
+        valid_proxies = []
+        for proxy in proxies:
+            if ':' in proxy:
+                valid_proxies.append(proxy)
+        return valid_proxies
     except FileNotFoundError:
         return []
+
+def save_session_data(session_id, data):
+    os.makedirs('session_data', exist_ok=True)
+    with open(f'session_data/session_{session_id}.json', 'w') as f:
+        json.dump(data, f)
+
+def load_session_data(session_id):
+    try:
+        with open(f'session_data/session_{session_id}.json', 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+# --- CORE FUNCTIONS ---
+def create_driver(proxy=None, session_id=None):
+    options = uc.ChromeOptions()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--mute-audio")
+    options.add_argument(f"--user-agent={get_random_user_agent()}")
+    
+    options.add_argument("--disable-webrtc")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    
+    if proxy:
+        if "://" not in proxy:
+            options.add_argument(f'--proxy-server=http://{proxy}')
+        else:
+            options.add_argument(f'--proxy-server={proxy}')
+            
+    if random.random() < 0.7:
+        width = random.randint(1024, 1920)
+        height = random.randint(768, 1080)
+        options.add_argument(f"--window-size={width},{height}")
+    else:
+        options.add_argument("--start-maximized")
+        
+    driver = uc.Chrome(options=options, headless=random.random() < 0.7)
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    driver.set_page_load_timeout(random.randint(30, 60))
+    driver.implicitly_wait(random.uniform(5, 15))
+    return driver
+
+def human_like_interaction(driver, watch_duration_minutes, session_id, proxy):
+    action = ActionChains(driver)
+    
+    update_status(session_id, proxy, "[yellow]Browsing homepage...[/yellow]")
+    if random.random() < 0.5:
+        try:
+            driver.get("https://www.youtube.com")
+            time.sleep(random.uniform(5, 15))
+            videos = driver.find_elements(By.XPATH, '//ytd-rich-item-renderer//a[@id="video-title"]')
+            if videos:
+                video = random.choice(videos)
+                action.move_to_element(video).pause(random.uniform(0.5, 2)).click().perform()
+                time.sleep(random.uniform(5, 20))
+                driver.back()
+        except Exception as e:
+            logging.error(f"[Session {session_id}] Homepage Error: {e}")
+            
+    update_status(session_id, proxy, "[yellow]Engaging with video...[/yellow]")
+    for _ in range(random.randint(2, 5)):
+        x_offset = random.randint(-200, 200) if random.random() < 0.7 else random.randint(-50, 50)
+        y_offset = random.randint(-100, -20) if x_offset < 100 else random.randint(20, -100)
+        try:
+            action.move_by_offset(x_offset, y_offset).perform()
+            time.sleep(random.uniform(0.1, 1.0))
+        except Exception:
+            action.reset_actions()
+            
+    scroll_pause = np.random.normal(1.0, 0.3) + random.uniform(-0.2, 0.2)
+    try:
+        scroll_height = driver.execute_script("return document.documentElement.scrollHeight")
+        current_scroll = driver.execute_script("return window.pageYOffset")
+    except:
+        current_scroll = 0
+        
+    for _ in range(random.randint(1, 4)):
+        scroll_amount = random.choice([10, 50, 100, -30, -80])
+        new_scroll = current_scroll + scroll_amount
+        try:
+            driver.execute_script(f"window.scrollTo(0, {new_scroll});")
+        except:
+            pass
+        time.sleep(scroll_pause + random.uniform(-0.3, 0.3))
+        current_scroll = new_scroll
+
+    base_watch_time = watch_duration_minutes * 60
+    watch_time = np.random.normal(base_watch_time, base_watch_time / 10)
+    watch_time = max(MIN_WATCH_TIME, min(watch_time, base_watch_time + 60))
+    
+    update_status(session_id, proxy, f"[bold green]Watching video for {watch_time:.0f}s[/bold green]")
+    engagement_interval = random.uniform(15, 45)
+    start_time = time.time()
+    
+    while time.time() - start_time < watch_time:
+        time.sleep(engagement_interval)
+        interaction = random.choice([
+            "like", "dislike", "subscribe", "comment", "share", "none", "none", "none"
+        ])
+        
+        try:
+            if interaction == "like":
+                like_btn = driver.find_element(By.XPATH, '//ytd-toggle-button-renderer[@aria-label="like this video" or contains(@aria-label, "like this video")]')
+                action.move_to_element(like_btn).pause(random.uniform(0.5, 2)).click().perform()
+                update_status(session_id, proxy, "[cyan]Liked video[/cyan]")
+            elif interaction == "dislike":
+                dislike_btn = driver.find_element(By.XPATH, '//ytd-toggle-button-renderer[@aria-label="dislike this video" or contains(@aria-label, "dislike this video")]')
+                action.move_to_element(dislike_btn).pause(random.uniform(0.5, 2)).click().perform()
+                update_status(session_id, proxy, "[cyan]Disliked video[/cyan]")
+            elif interaction == "subscribe":
+                sub_btn = driver.find_element(By.XPATH, '//ytd-subscribe-button-renderer//button | //ytd-subscribe-button-renderer')
+                action.move_to_element(sub_btn).pause(random.uniform(1, 3)).click().perform()
+                update_status(session_id, proxy, "[cyan]Subscribed[/cyan]")
+            elif interaction == "comment":
+                comment_btn = driver.find_element(By.XPATH, '//ytd-comment-simplebox-renderer//yt-formatted-string[contains(text(), "Add a comment")] | //ytd-comment-simplebox-renderer')
+                action.move_to_element(comment_btn).pause(random.uniform(1, 3)).click().perform()
+                comment_box = driver.find_element(By.XPATH, '//div[@id="contenteditable-root"]')
+                comments = ["Nice video!", "First!", "This helped me a lot.", "Subbed!", "I disagree with this.", "Where’s the like button?", "Great content!"]
+                comment_box.send_keys(random.choice(comments))
+                post_btn = driver.find_element(By.XPATH, '//ytd-button-renderer[@id="submit-button"]')
+                action.move_to_element(post_btn).pause(random.uniform(2, 5)).click().perform()
+                update_status(session_id, proxy, "[cyan]Posted comment[/cyan]")
+        except Exception as e:
+            logging.error(f"[Session {session_id}] Engagement Error: {e}")
+
+    update_status(session_id, proxy, "[yellow]Browsing related videos...[/yellow]")
+    try:
+        related_videos = driver.find_elements(By.XPATH, '//ytd-compact-video-renderer//a[@id="video-title"]')
+        if related_videos:
+            video = random.choice([v for v in related_videos if v.is_displayed()])
+            action.move_to_element(video).pause(random.uniform(1, 3)).click().perform()
+            time.sleep(random.uniform(10, 45))
+    except Exception as e:
+        logging.error(f"[Session {session_id}] Related Video Error: {e}")
+
+def load_session(url, proxy=None, session_id=None, watch_duration_minutes=2.0):
+    driver = None
+    retries = MAX_RETRIES
+
+    while retries > 0:
+        try:
+            update_status(session_id, proxy, "[cyan]Initializing Browser...[/cyan]")
+            driver = create_driver(proxy, session_id)
+            
+            session_data_cache = load_session_data(session_id)
+            if session_data_cache:
+                try:
+                    driver.get("https://www.youtube.com")
+                    for cookie in session_data_cache.get("cookies", []):
+                        driver.add_cookie(cookie)
+                    update_status(session_id, proxy, "[cyan]Loaded session data[/cyan]")
+                except Exception as e:
+                    logging.error(f"[Session {session_id}] Cookie Load Error: {e}")
+                    
+            update_status(session_id, proxy, "[cyan]Loading URL...[/cyan]")
+            time.sleep(random.uniform(2, 8))
+            
+            try:
+                driver.get(url)
+            except TimeoutException:
+                update_status(session_id, proxy, "[bold red]Timeout (Retrying...)[/bold red]")
+                retries -= 1
+                if driver:
+                    driver.quit()
+                continue
+            except WebDriverException as e:
+                update_status(session_id, proxy, "[bold red]Connection Failed[/bold red]")
+                logging.error(f"[Session {session_id}] Load Error (Proxy: {proxy}): {e}")
+                if driver:
+                    driver.quit()
+                return False
+
+            try:
+                page_source_lower = driver.page_source.lower()
+                current_url_lower = driver.current_url.lower()
+                if ("verify" in current_url_lower or "captcha" in page_source_lower or "unusual traffic" in page_source_lower):
+                    update_status(session_id, proxy, "[bold red]CAPTCHA Detected[/bold red]")
+                    if proxy:
+                        with open('dead_proxies.txt', 'a') as f:
+                            f.write(f"{proxy}\n")
+                    retries -= 1
+                    if driver:
+                        driver.quit()
+                    continue
+            except Exception:
+                pass
+
+            try:
+                human_like_interaction(driver, watch_duration_minutes, session_id, proxy)
+            except Exception as e:
+                logging.error(f"[Session {session_id}] Interaction Error: {e}")
+                update_status(session_id, proxy, "[bold red]Interaction Failed[/bold red]")
+                retries -= 1
+                if driver:
+                    driver.quit()
+                continue
+
+            update_status(session_id, proxy, "[cyan]Saving session data...[/cyan]")
+            try:
+                cookies = driver.get_cookies()
+                local_storage = driver.execute_script("return Object.assign({}, window.localStorage);")
+                new_session_data = {
+                    "cookies": cookies,
+                    "local_storage": local_storage,
+                    "last_url": driver.current_url
+                }
+                save_session_data(session_id, new_session_data)
+            except Exception as e:
+                logging.error(f"[Session {session_id}] Session Save Error: {e}")
+
+            update_status(session_id, proxy, "[bold blue]Session Completed 🎉[/bold blue]")
+            time.sleep(random.uniform(2, 5))
+
+            return True
+
+        except Exception as e:
+            logging.error(f"[Session {session_id}] General Error (Proxy: {proxy}): {e}")
+            update_status(session_id, proxy, "[bold red]Session Crashed[/bold red]")
+            retries -= 1
+            if driver:
+                driver.quit()
+        finally:
+            if driver and retries <= 0:
+                driver.quit()
+
+    if retries <= 0:
+        update_status(session_id, proxy, "[bold red]Max Retries Reached[/bold red]")
+        return False
 
 def worker(url, proxies, use_proxies, task_queue, watch_duration_minutes):
     while not task_queue.empty():
         session_id = task_queue.get()
-        proxy = random.choice(proxies) if use_proxies else None
-        load_session(url, proxy, session_id, watch_duration_minutes)
+        proxy = None
+
+        if use_proxies:
+            try:
+                with open('dead_proxies.txt', 'r') as f:
+                    dead_proxies = [line.strip() for line in f if line.strip()]
+            except FileNotFoundError:
+                dead_proxies = []
+            
+            available_proxies = [p for p in proxies if p not in dead_proxies]
+            if not available_proxies:
+                update_status(session_id, None, "[bold red]No Valid Proxies Left[/bold red]")
+                task_queue.task_done()
+                continue
+
+            proxy = random.choice(available_proxies)
+            
+        success = load_session(url, proxy, session_id, watch_duration_minutes)
+        
+        if session_id % MEMORY_CLEANUP_INTERVAL == 0:
+            clean_memory()
+
         task_queue.task_done()
 
 if __name__ == "__main__":
@@ -193,13 +347,17 @@ if __name__ == "__main__":
     view_count = int(input("Enter number of views: ").strip())
     thread_count = int(input("Enter number of concurrent threads (e.g., 5): ").strip())
     watch_duration_minutes = float(input("Enter watch duration in minutes (e.g., 2.5): ").strip())
-    
+
     proxy_file = './proxies.txt'
     proxies = load_proxies(proxy_file)
     use_proxies = bool(proxies)
     
+    if not proxies and use_proxies:
+        print("[!] No valid proxies found. Running without proxies.")
+        use_proxies = False
+
     print(f"Loaded {len(proxies)} proxies.")
-    print(f"Starting YouTube view automation. Check 'bot_errors.log' for detailed errors.\n")
+    print(f"Starting YouTube view automation. Check 'bot_errors.log' for errors.\n")
     
     task_queue = Queue()
     for i in range(view_count):
@@ -207,13 +365,15 @@ if __name__ == "__main__":
         
     threads = []
     for _ in range(thread_count):
-        t = threading.Thread(target=worker, args=(youtube_url, proxies, use_proxies, task_queue, watch_duration_minutes))
-        t.daemon = True
+        t = threading.Thread(
+            target=worker,
+            args=(youtube_url, proxies, use_proxies, task_queue, watch_duration_minutes),
+            daemon=True
+        )
         t.start()
         threads.append(t)
-        time.sleep(1)
-        
-    # Gunakan Rich Live Dashboard selama thread masih berjalan
+        time.sleep(random.uniform(0.5, 2))
+
     with Live(generate_table(), refresh_per_second=4) as live:
         while any(t.is_alive() for t in threads):
             live.update(generate_table())
@@ -221,3 +381,4 @@ if __name__ == "__main__":
             
     task_queue.join()
     console.print(f"\n[bold green]✅ Completed {view_count} views.[/bold green]")
+    console.print("[bold yellow]⚠️  Check 'dead_proxies.txt' for blacklisted proxies.[/bold yellow]")
