@@ -34,6 +34,7 @@ thread_status = {}
 session_data = {}
 dead_proxies = set()
 dead_proxies_lock = threading.Lock()
+driver_lock = threading.Lock()
 
 # --- HELPER FUNCTIONS ---
 def update_status(session_id, proxy, status):
@@ -59,10 +60,7 @@ def generate_table():
 
 def get_random_user_agent():
     ua = UserAgent()
-    if random.random() < 0.6:
-        return ua.random_device  # Mobile UA
-    else:
-        return ua.random  # Desktop UA
+    return ua.random
 
 def clean_memory():
     # Deprecated: Killing processes indiscriminately causes other active threads to crash.
@@ -105,8 +103,7 @@ def create_driver(proxy=None, session_id=None):
     options.add_argument(f"--user-agent={get_random_user_agent()}")
     
     options.add_argument("--disable-webrtc")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
+    
     
     if proxy:
         if "://" not in proxy:
@@ -121,7 +118,10 @@ def create_driver(proxy=None, session_id=None):
     else:
         options.add_argument("--start-maximized")
         
-    driver = uc.Chrome(options=options, headless=random.random() < 0.7)
+    with driver_lock:
+        # Menyesuaikan dengan versi Chrome yang terinstal di Windows RDP Anda (versi 149)
+        driver = uc.Chrome(options=options, headless=random.random() < 0.7, version_main=149)
+        
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     driver.set_page_load_timeout(random.randint(30, 60))
     driver.implicitly_wait(random.uniform(5, 15))
