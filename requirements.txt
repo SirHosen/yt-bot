@@ -1,0 +1,7 @@
+requests[socks]
+fake_useragent
+undetected_chromedriver
+selenium
+rich
+psutil
+numpy

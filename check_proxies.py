@@ -9,6 +9,13 @@ TIMEOUT = 5  # Maksimal waktu tunggu (detik) per proxy
 
 def check_proxy(proxy):
     """Fungsi untuk mengecek satu proxy"""
+    # Jika proxy adalah SOCKS5, kita sarankan resolusi DNS di sisi proxy dengan menambahkan 'h'
+    # requests[socks] mendukung 'socks5h://' untuk DNS jarak jauh.
+    if proxy.startswith('socks5://'):
+        proxy = proxy.replace('socks5://', 'socks5h://')
+    elif proxy.startswith('socks4://'):
+        proxy = proxy.replace('socks4://', 'socks4a://')
+        
     proxies = {
         "http": proxy,
         "https": proxy
@@ -19,9 +26,11 @@ def check_proxy(proxy):
         response = requests.get(TEST_URL, proxies=proxies, timeout=TIMEOUT)
         if response.status_code == 200:
             elapsed = time.time() - start_time
-            print(f"[+] AKTIF - {proxy} (Kecepatan: {elapsed:.2f}s)")
-            return proxy
-    except Exception:
+            # Mengembalikan format asli (tanpa 'h' atau 'a') untuk Chrome
+            original_proxy = proxy.replace('socks5h://', 'socks5://').replace('socks4a://', 'socks4://')
+            print(f"[+] AKTIF - {original_proxy} (Kecepatan: {elapsed:.2f}s)")
+            return original_proxy
+    except requests.exceptions.RequestException:
         # Jika gagal konek, timeout, atau proxy mati
         pass
     

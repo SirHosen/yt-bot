@@ -32,6 +32,8 @@ logging.basicConfig(
 console = Console()
 thread_status = {}
 session_data = {}
+dead_proxies = set()
+dead_proxies_lock = threading.Lock()
 
 # --- HELPER FUNCTIONS ---
 def update_status(session_id, proxy, status):
@@ -63,10 +65,12 @@ def get_random_user_agent():
         return ua.random  # Desktop UA
 
 def clean_memory():
-    for proc in psutil.process_iter(['pid', 'name']):
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
             if 'chrome' in proc.info['name'].lower():
-                proc.kill()
+                cmdline = proc.info.get('cmdline')
+                if cmdline and any('--disable-blink-features=AutomationControlled' in arg for arg in cmdline):
+                    proc.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
@@ -188,28 +192,34 @@ def human_like_interaction(driver, watch_duration_minutes, session_id, proxy):
         
         try:
             if interaction == "like":
-                like_btn = driver.find_element(By.XPATH, '//ytd-toggle-button-renderer[@aria-label="like this video" or contains(@aria-label, "like this video")]')
-                action.move_to_element(like_btn).pause(random.uniform(0.5, 2)).click().perform()
-                update_status(session_id, proxy, "[cyan]Liked video[/cyan]")
+                like_btn = driver.find_elements(By.XPATH, '//ytd-toggle-button-renderer[@aria-label="like this video" or contains(@aria-label, "like this video")]')
+                if like_btn:
+                    action.move_to_element(like_btn[0]).pause(random.uniform(0.5, 2)).click().perform()
+                    update_status(session_id, proxy, "[cyan]Liked video[/cyan]")
             elif interaction == "dislike":
-                dislike_btn = driver.find_element(By.XPATH, '//ytd-toggle-button-renderer[@aria-label="dislike this video" or contains(@aria-label, "dislike this video")]')
-                action.move_to_element(dislike_btn).pause(random.uniform(0.5, 2)).click().perform()
-                update_status(session_id, proxy, "[cyan]Disliked video[/cyan]")
+                dislike_btn = driver.find_elements(By.XPATH, '//ytd-toggle-button-renderer[@aria-label="dislike this video" or contains(@aria-label, "dislike this video")]')
+                if dislike_btn:
+                    action.move_to_element(dislike_btn[0]).pause(random.uniform(0.5, 2)).click().perform()
+                    update_status(session_id, proxy, "[cyan]Disliked video[/cyan]")
             elif interaction == "subscribe":
-                sub_btn = driver.find_element(By.XPATH, '//ytd-subscribe-button-renderer//button | //ytd-subscribe-button-renderer')
-                action.move_to_element(sub_btn).pause(random.uniform(1, 3)).click().perform()
-                update_status(session_id, proxy, "[cyan]Subscribed[/cyan]")
+                sub_btn = driver.find_elements(By.XPATH, '//ytd-subscribe-button-renderer//button | //ytd-subscribe-button-renderer')
+                if sub_btn:
+                    action.move_to_element(sub_btn[0]).pause(random.uniform(1, 3)).click().perform()
+                    update_status(session_id, proxy, "[cyan]Subscribed[/cyan]")
             elif interaction == "comment":
-                comment_btn = driver.find_element(By.XPATH, '//ytd-comment-simplebox-renderer//yt-formatted-string[contains(text(), "Add a comment")] | //ytd-comment-simplebox-renderer')
-                action.move_to_element(comment_btn).pause(random.uniform(1, 3)).click().perform()
-                comment_box = driver.find_element(By.XPATH, '//div[@id="contenteditable-root"]')
-                comments = ["Nice video!", "First!", "This helped me a lot.", "Subbed!", "I disagree with this.", "Where’s the like button?", "Great content!"]
-                comment_box.send_keys(random.choice(comments))
-                post_btn = driver.find_element(By.XPATH, '//ytd-button-renderer[@id="submit-button"]')
-                action.move_to_element(post_btn).pause(random.uniform(2, 5)).click().perform()
-                update_status(session_id, proxy, "[cyan]Posted comment[/cyan]")
+                comment_btn = driver.find_elements(By.XPATH, '//ytd-comment-simplebox-renderer//yt-formatted-string[contains(text(), "Add a comment")] | //ytd-comment-simplebox-renderer')
+                if comment_btn:
+                    action.move_to_element(comment_btn[0]).pause(random.uniform(1, 3)).click().perform()
+                    comment_box = driver.find_elements(By.XPATH, '//div[@id="contenteditable-root"]')
+                    if comment_box:
+                        comments = ["Nice video!", "First!", "This helped me a lot.", "Subbed!", "I disagree with this.", "Where’s the like button?", "Great content!"]
+                        comment_box[0].send_keys(random.choice(comments))
+                        post_btn = driver.find_elements(By.XPATH, '//ytd-button-renderer[@id="submit-button"]')
+                        if post_btn:
+                            action.move_to_element(post_btn[0]).pause(random.uniform(2, 5)).click().perform()
+                            update_status(session_id, proxy, "[cyan]Posted comment[/cyan]")
         except Exception as e:
-            logging.error(f"[Session {session_id}] Engagement Error: {e}")
+            logging.debug(f"[Session {session_id}] Engagement Error: {e}")
 
     update_status(session_id, proxy, "[yellow]Browsing related videos...[/yellow]")
     try:
@@ -264,8 +274,11 @@ def load_session(url, proxy=None, session_id=None, watch_duration_minutes=2.0):
                 if ("verify" in current_url_lower or "captcha" in page_source_lower or "unusual traffic" in page_source_lower):
                     update_status(session_id, proxy, "[bold red]CAPTCHA Detected[/bold red]")
                     if proxy:
-                        with open('dead_proxies.txt', 'a') as f:
-                            f.write(f"{proxy}\n")
+                        with dead_proxies_lock:
+                            if proxy not in dead_proxies:
+                                dead_proxies.add(proxy)
+                                with open('dead_proxies.txt', 'a') as f:
+                                    f.write(f"{proxy}\n")
                     retries -= 1
                     if driver:
                         driver.quit()
@@ -321,13 +334,9 @@ def worker(url, proxies, use_proxies, task_queue, watch_duration_minutes):
         proxy = None
 
         if use_proxies:
-            try:
-                with open('dead_proxies.txt', 'r') as f:
-                    dead_proxies = [line.strip() for line in f if line.strip()]
-            except FileNotFoundError:
-                dead_proxies = []
-            
-            available_proxies = [p for p in proxies if p not in dead_proxies]
+            with dead_proxies_lock:
+                available_proxies = [p for p in proxies if p not in dead_proxies]
+                
             if not available_proxies:
                 update_status(session_id, None, "[bold red]No Valid Proxies Left[/bold red]")
                 task_queue.task_done()
@@ -351,6 +360,14 @@ if __name__ == "__main__":
     proxy_file = './proxies.txt'
     proxies = load_proxies(proxy_file)
     use_proxies = bool(proxies)
+    
+    # Load existing dead proxies
+    try:
+        with open('dead_proxies.txt', 'r') as f:
+            initial_dead = [line.strip() for line in f if line.strip()]
+            dead_proxies.update(initial_dead)
+    except FileNotFoundError:
+        pass
     
     if not proxies and use_proxies:
         print("[!] No valid proxies found. Running without proxies.")
